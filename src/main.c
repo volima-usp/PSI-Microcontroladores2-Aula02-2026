@@ -6,15 +6,23 @@
 // --- Configuração de LEDs via DeviceTree ---
 #define LED_A_NODE DT_ALIAS(led0)  // LED verde
 #define LED_B_NODE DT_ALIAS(led2)  // LED vermelho
+#define LED_C_NODE DT_ALIAS(led1)
+#define BUTTON_NODE DT_NODELABEL(user_button_0)
+
+
 
 static const struct gpio_dt_spec ledA = GPIO_DT_SPEC_GET(LED_A_NODE, gpios);
 static const struct gpio_dt_spec ledB = GPIO_DT_SPEC_GET(LED_B_NODE, gpios);
+static const struct gpio_dt_spec ledc = GPIO_DT_SPEC_GET(LED_C_NODE, gpios);
+static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(BUTTON_NODE, gpios);
+static struct gpio_callback button_cb_data;
+
 
 // --- Prioridades e tempos ---
 #define PRIO_THREAD_A 5   // Verde - Maior prioridade (número menor) 
-#define PRIO_THREAD_B 7   // Vermelho - Menor prioridade
+#define PRIO_THREAD_B 5   // Vermelho - Menor prioridade
 #define TEMPO_A_MS   1500   // Thread A dorme
-#define TEMPO_B_MS   1000   // Thread B dorme
+#define TEMPO_B_MS   1000   // Thread B dorme   
 
 // ----------------------------------------------------
 // THREAD A — Tarefa curta, alta prioridade
@@ -27,11 +35,15 @@ void thread_A(void *p1, void *p2, void *p3)
         gpio_pin_set_dt(&ledA, 1);  // Liga LED verde
 
         // Simula processamento rápido 
-        for (volatile int i = 0; i < 200000; i++) {}
+        for (volatile int i = 0; i < 200000; i++) {
+               if (i % 100000 == 0) {
+                // Aqui não imprimimos nada — apenas ocupamos a CPU
+            }
+        }
 
         gpio_pin_set_dt(&ledA, 0);  // Desliga LED verde
 		end_ms1=k_uptime_get();
-		printk("\nT_A \nTi: %llu \nTf: %llu\nPerc: %llu\n", start_ms1, end_ms1, end_ms1-start_ms1);
+		printk("\nT_A \nTi: %llu \tTf: %llu\tPerc: %llu\n", start_ms1, end_ms1, end_ms1-start_ms1);
         k_msleep(TEMPO_A_MS);       // Dorme — libera CPU
 
 
@@ -57,10 +69,17 @@ void thread_B(void *p1, void *p2, void *p3)
 		
         gpio_pin_set_dt(&ledB, 0);  // Desliga LED vermelho
 		end_ms=k_uptime_get();
-		printk("\nT_B \nTi: %llu \nTf: %llu\nPerc: %llu\n", start_ms, end_ms, end_ms-start_ms);
+		printk("\nT_B \nTi: %llu \tTf: %llu\tPerc: %llu\n", start_ms, end_ms, end_ms-start_ms);
         k_msleep(TEMPO_B_MS);       // Dorme um pouco
     }
 }
+
+// ISR - Toggle LED
+void button_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+    gpio_pin_toggle_dt(&ledc);
+}
+
 
 // ----------------------------------------------------
 // Definição das threads
@@ -81,6 +100,14 @@ void main(void)
     }
     gpio_pin_configure_dt(&ledA, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&ledB, GPIO_OUTPUT_INACTIVE);
+    // Configurar LED e botão com pull-up
+    gpio_pin_configure_dt(&ledc, GPIO_OUTPUT_INACTIVE);
+    gpio_pin_configure_dt(&button, GPIO_INPUT | GPIO_PULL_UP);
+    
+    // Configurar interrupção na borda de descida
+    gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_FALLING);
+    gpio_init_callback(&button_cb_data, button_isr, BIT(button.pin));
+    gpio_add_callback(button.port, &button_cb_data);
 
     printk("=== Demonstração de Preempção com LEDs ===\n");
     printk("Thread A (Verde): prioridade %d\n", PRIO_THREAD_A);
